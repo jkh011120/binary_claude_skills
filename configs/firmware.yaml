@@ -1,0 +1,149 @@
+framework:
+  name: firmware
+  display_name: "Embedded Firmware"
+  description: "임베디드 펌웨어 바이너리 (ARM/MIPS/RISC-V, bare-metal 또는 RTOS)"
+
+entrypoint_patterns:
+  reset:
+    - "Reset_Handler"
+    - "_start"
+    - "firmware_entry"
+    - "app_main"
+    - "main"
+  interrupt:
+    - regex: ".*_IRQHandler$"
+      description: "Cortex-M IRQ handlers"
+    - regex: ".*_Handler$"
+      description: "Exception handlers"
+    - regex: "^isr_.*"
+      description: "ISR prefixed handlers"
+    - regex: "^INT_.*"
+      description: "Interrupt handlers"
+  command:
+    - regex: "^(cmd_|handle_|process_|do_|dispatch_).*"
+      description: "Command/message handlers"
+    - regex: ".*_cmd_handler$"
+      description: "Command handler suffix"
+  communication:
+    - regex: "^(uart|spi|i2c|usb|can|eth|ble|wifi)_.*"
+      description: "Peripheral communication functions"
+  ota:
+    - regex: ".*(update|upgrade|flash|ota|firmware).*"
+      description: "OTA/firmware update functions"
+
+indicator_patterns:
+  user_control:
+    - "\\buart_read\\b"
+    - "\\buart_receive\\b"
+    - "\\bspi_receive\\b"
+    - "\\bi2c_read\\b"
+    - "\\busb_read\\b"
+    - "\\brecv\\b"
+    - "\\bread\\b"
+    - "\\bcan_receive\\b"
+    - "\\bble_.*read\\b"
+    - "\\bwifi_.*recv\\b"
+  dangerous_api:
+    - "\\bstrcpy\\b"
+    - "\\bstrcat\\b"
+    - "\\bsprintf\\b"
+    - "\\bgets\\b"
+    - "\\bmemcpy\\b"
+    - "\\bmemmove\\b"
+  lifetime:
+    - "\\bmalloc\\b"
+    - "\\bpvPortMalloc\\b"
+    - "\\bvPortFree\\b"
+    - "\\bfree\\b"
+    - "\\bcalloc\\b"
+    - "\\bk_malloc\\b"
+    - "\\bk_free\\b"
+  mmio:
+    - "\\bREAD_REG\\b"
+    - "\\bWRITE_REG\\b"
+    - "\\b__io_hw_read\\b"
+    - "\\b__io_hw_write\\b"
+    - "\\bHW_REG\\b"
+    - "\\bMMIO_READ\\b"
+    - "\\bMMIO_WRITE\\b"
+  dma:
+    - "\\bDMA_.*Transfer\\b"
+    - "\\bHAL_DMA_Start\\b"
+    - "\\bdma_config\\b"
+    - "\\bdma_alloc\\b"
+  crypto_weak:
+    - "\\bDES\\b"
+    - "\\bRC4\\b"
+    - "\\bMD5\\b"
+    - "\\brand\\b"
+    - "\\bsrand\\b"
+    - "\\bXOR.*encrypt\\b"
+  hardcoded:
+    - "password"
+    - "secret"
+    - "key"
+    - "admin"
+    - "root"
+    - "default_pass"
+    - "backdoor"
+  auth:
+    - "\\b(check|verify|validate)_(password|pin|auth|token|credential)\\b"
+    - "\\blogin\\b"
+    - "\\bauthenticate\\b"
+  guards:
+    - "\\bstrncpy\\b"
+    - "\\bsnprintf\\b"
+    - "\\bstrlcpy\\b"
+    - "\\bsizeof\\b"
+    - "\\bmin\\b"
+    - "\\bMAX_LEN\\b"
+
+score_weights:
+  user_control: 3.0
+  dangerous_api: 2.5
+  lifetime: 2.0
+  mmio: 1.5
+  dma: 2.0
+  crypto_weak: 2.0
+  hardcoded: 2.5
+  auth: 2.0
+  guards: -0.35
+
+false_positive_rules:
+  - pattern: ".*_IRQHandler$"
+    condition: "size < 20"
+    reason: "단순 ISR stub (플래그 설정만)"
+    auto_downgrade: true
+    target_risk: "info"
+  - pattern: "^HAL_.*Init$"
+    reason: "HAL 초기화 - 고정 레지스터 값"
+    auto_downgrade: true
+    target_risk: "low"
+  - pattern: "^SystemInit$|^SystemClock_Config$"
+    reason: "시스템 초기화 루틴"
+    auto_downgrade: true
+    target_risk: "info"
+  - pattern: "^Default_Handler$|^HardFault_Handler$"
+    reason: "기본 예외 핸들러"
+    auto_downgrade: true
+    target_risk: "info"
+
+prompt_context:
+  role: "embedded firmware vulnerability analyst"
+  framework_knowledge: |
+    ## Embedded Firmware Analysis
+    - 인터럽트 핸들러(IRQHandler)가 주요 비동기 진입점
+    - UART/SPI/I2C/USB/CAN/BLE 통신이 외부 입력 경로
+    - MMIO 레지스터 직접 접근 → 부적절한 레지스터 조작 시 하드웨어 손상 가능
+    - DMA 버퍼 관리: DMA 전송 중 버퍼 접근 시 race condition
+    - RTOS 환경: 태스크 간 공유 자원 동기화 문제
+    - OTA/펌웨어 업데이트: 서명 검증 누락 시 악성 펌웨어 주입
+    - 하드코딩된 크레덴셜: 임베디드에서 매우 빈번
+    - 메모리 보호 부재: MPU 미설정 시 코드/데이터 분리 없음
+    - 디버그 인터페이스: JTAG/SWD 비활성화 여부 확인
+  analysis_focus:
+    - "외부 통신 인터페이스 → 명령 파싱 → 위험 API 경로"
+    - "하드코딩된 크레덴셜/백도어"
+    - "OTA 업데이트 무결성 검증"
+    - "DMA 버퍼 경계 조건"
+    - "인터럽트 컨텍스트에서의 안전하지 않은 연산"

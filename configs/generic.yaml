@@ -1,0 +1,99 @@
+framework:
+  name: generic
+  display_name: "Generic Binary"
+  description: "범용 바이너리 분석 — 유형 자동 감지 실패 시 폴백"
+
+entrypoint_patterns:
+  standard:
+    - "main"
+    - "wmain"
+    - "WinMain"
+    - "_start"
+    - "DriverEntry"
+    - "DllMain"
+    - "entry_point"
+  exported:
+    - regex: "^(?!sub_|loc_|unk_|byte_|word_|dword_|qword_).*"
+      description: "IDA 자동 명명이 아닌 모든 심볼 (이미 이름이 있는 함수)"
+  large:
+    - regex: ".*"
+      condition: "size > 500"
+      description: "500바이트 이상 큰 함수"
+
+indicator_patterns:
+  user_control:
+    - "\\bread\\b"
+    - "\\brecv\\b"
+    - "\\bfgets\\b"
+    - "\\bscanf\\b"
+    - "\\bgets\\b"
+    - "\\bReadFile\\b"
+    - "\\bcopy_from_user\\b"
+    - "\\bWdfRequestRetrieveInputBuffer\\b"
+  dangerous_api:
+    - "\\bstrcpy\\b"
+    - "\\bstrcat\\b"
+    - "\\bsprintf\\b"
+    - "\\bgets\\b"
+    - "\\bsystem\\b"
+    - "\\bmemcpy\\b"
+    - "\\bwcscpy\\b"
+  lifetime:
+    - "\\bmalloc\\b"
+    - "\\bfree\\b"
+    - "\\bnew\\b"
+    - "\\bdelete\\b"
+    - "\\bkmalloc\\b"
+    - "\\bkfree\\b"
+    - "\\bExAllocatePool\\b"
+    - "\\bExFreePool\\b"
+  concurrency:
+    - "\\block\\b"
+    - "\\bunlock\\b"
+    - "\\bmutex\\b"
+    - "\\bspin_lock\\b"
+    - "\\bCreateThread\\b"
+    - "\\bpthread_create\\b"
+  hardcoded:
+    - "password"
+    - "secret"
+    - "key"
+    - "token"
+    - "admin"
+  guards:
+    - "\\bstrncpy\\b"
+    - "\\bsnprintf\\b"
+    - "\\bsizeof\\b"
+    - "\\bstrlen\\b"
+
+score_weights:
+  user_control: 3.0
+  dangerous_api: 2.5
+  lifetime: 2.0
+  concurrency: 1.5
+  hardcoded: 1.5
+  guards: -0.35
+
+false_positive_rules:
+  - pattern: "^sub_[0-9a-fA-F]+$"
+    condition: "size < 30"
+    reason: "매우 작은 미명명 함수 — thunk/wrapper일 가능성"
+    auto_downgrade: true
+    target_risk: "info"
+
+prompt_context:
+  role: "binary vulnerability analyst"
+  framework_knowledge: |
+    ## Generic Binary Analysis
+    - 바이너리 유형이 불분명할 때 사용하는 범용 프레임워크
+    - 먼저 imports와 strings를 분석하여 바이너리 유형을 추론할 것
+    - 유형 판별 힌트:
+      * DriverEntry/IoCreateDevice → Windows 드라이버 → windows_driver로 전환
+      * copy_from_user/kmalloc → Linux 커널 모듈 → linux_kernel로 전환
+      * IRQHandler/HAL_ → 펌웨어 → firmware로 전환
+      * main/printf/socket → 유저 앱 → userspace로 전환
+    - 유형 판별 후 적절한 framework config로 재시작 권장
+  analysis_focus:
+    - "바이너리 유형 판별 (imports/strings 기반)"
+    - "exported 함수 및 큰 함수 우선 분석"
+    - "범용 위험 API 패턴 탐색"

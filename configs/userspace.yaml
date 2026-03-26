@@ -1,0 +1,127 @@
+framework:
+  name: userspace
+  display_name: "Userspace Application"
+  description: "Linux/Windows 유저 공간 C/C++ 바이너리 (ELF/PE)"
+
+entrypoint_patterns:
+  main:
+    - "main"
+    - "wmain"
+    - "WinMain"
+    - "_start"
+  exported:
+    - regex: "^[A-Z][a-z].*"
+      description: "CamelCase exported functions"
+  network:
+    - regex: ".*_(handler|callback|dispatch|process|parse)$"
+      description: "Handler/callback patterns"
+  plugin:
+    - regex: "^(plugin_|module_|ext_).*init"
+      description: "Plugin/module entry points"
+
+indicator_patterns:
+  user_control:
+    - "\\bread\\b"
+    - "\\brecv\\b"
+    - "\\brecvfrom\\b"
+    - "\\bfgets\\b"
+    - "\\bscanf\\b"
+    - "\\bgets\\b"
+    - "\\bgetenv\\b"
+    - "\\bReadFile\\b"
+    - "\\bInternetReadFile\\b"
+    - "\\bargv\\b"
+    - "\\bfread\\b"
+  dangerous_api:
+    - "\\bstrcpy\\b"
+    - "\\bstrcat\\b"
+    - "\\bsprintf\\b"
+    - "\\bgets\\b"
+    - "\\bsystem\\b"
+    - "\\bexecve?\\b"
+    - "\\bpopen\\b"
+    - "\\bvsprintf\\b"
+    - "\\bwcscpy\\b"
+    - "\\b_mbscpy\\b"
+  lifetime:
+    - "\\bmalloc\\b"
+    - "\\bcalloc\\b"
+    - "\\brealloc\\b"
+    - "\\bfree\\b"
+    - "\\bnew\\b"
+    - "\\bdelete\\b"
+    - "\\bHeapAlloc\\b"
+    - "\\bHeapFree\\b"
+    - "\\bVirtualAlloc\\b"
+    - "\\bVirtualFree\\b"
+  concurrency:
+    - "\\bpthread_mutex_lock\\b"
+    - "\\bpthread_create\\b"
+    - "\\bCreateThread\\b"
+    - "\\bEnterCriticalSection\\b"
+    - "\\bWaitForSingleObject\\b"
+  format_string:
+    - "\\bprintf\\b"
+    - "\\bfprintf\\b"
+    - "\\bsyslog\\b"
+    - "\\bsprintf\\b"
+    - "\\bsnprintf\\b"
+  crypto_weak:
+    - "\\bDES_\\b"
+    - "\\bRC4\\b"
+    - "\\bMD5\\b"
+    - "\\brand\\b"
+    - "\\bsrand\\b"
+  hardcoded:
+    - "password"
+    - "secret"
+    - "api_key"
+    - "token"
+    - "admin"
+  guards:
+    - "\\bstrncpy\\b"
+    - "\\bsnprintf\\b"
+    - "\\bstrlcpy\\b"
+    - "\\bmemcpy_s\\b"
+    - "\\bstrlen\\b"
+    - "\\bsizeof\\b"
+
+score_weights:
+  user_control: 3.0
+  dangerous_api: 2.5
+  lifetime: 2.0
+  concurrency: 1.5
+  format_string: 2.0
+  crypto_weak: 1.5
+  hardcoded: 1.5
+  guards: -0.35
+
+false_positive_rules:
+  - pattern: ".*_init$"
+    reason: "초기화 함수는 고정값 사용"
+    auto_downgrade: true
+    target_risk: "low"
+  - pattern: ".*_cleanup$|.*_destroy$|.*_fini$"
+    reason: "정리 함수는 공격 표면이 제한적"
+    auto_downgrade: true
+    target_risk: "low"
+  - pattern: "^__.*"
+    reason: "컴파일러 생성 함수"
+    auto_downgrade: true
+    target_risk: "info"
+
+prompt_context:
+  role: "userspace binary vulnerability analyst"
+  framework_knowledge: |
+    ## Userspace Application Analysis
+    - main() 또는 exported 함수가 주요 진입점
+    - 네트워크 입력(recv/read), 파일 입력(fread/fgets), 환경변수(getenv), CLI 인자(argv)가 공격 벡터
+    - 스택 보호: canary, ASLR, NX, PIE, RELRO 확인 필요
+    - GOT overwrite, format string, heap exploitation 가능성 평가
+    - C++ 바이너리: vtable hijacking, type confusion 주의
+    - Windows: SEH overwrite, SafeSEH/SEHOP 확인
+  analysis_focus:
+    - "사용자 입력 → 위험 API 도달 경로 (taint analysis)"
+    - "힙 할당/해제 패턴 (UAF, double-free)"
+    - "정수 오버플로우 → 버퍼 크기 계산"
+    - "format string 취약점 (사용자 입력이 format 인자로)"

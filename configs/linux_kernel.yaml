@@ -1,0 +1,141 @@
+framework:
+  name: linux_kernel
+  display_name: "Linux Kernel Module"
+  description: "리눅스 커널 모듈 (.ko) 및 커널 서브시스템"
+
+entrypoint_patterns:
+  module:
+    - regex: ".*_init$"
+      description: "module_init entry"
+    - regex: ".*_exit$"
+      description: "module_exit cleanup"
+    - "init_module"
+    - "cleanup_module"
+  ioctl:
+    - regex: ".*_ioctl$"
+      description: "ioctl handlers"
+    - regex: ".*_unlocked_ioctl$"
+    - regex: ".*_compat_ioctl$"
+  file_operations:
+    - regex: ".*_(read|write|open|release|mmap|poll|seek)$"
+      description: "file_operations callbacks"
+  syscall:
+    - regex: "^__do_sys_.*"
+    - regex: "^__se_sys_.*"
+    - regex: "^SYSCALL_DEFINE.*"
+  netlink:
+    - regex: ".*_nl_.*"
+    - regex: ".*_genl_.*"
+    - regex: ".*_netlink_.*"
+  sysfs:
+    - regex: ".*_(show|store)$"
+      description: "sysfs attribute handlers"
+  proc:
+    - regex: ".*_proc_(read|write|open)$"
+      description: "procfs handlers"
+
+indicator_patterns:
+  user_control:
+    - "\\bcopy_from_user\\b"
+    - "\\b__copy_from_user\\b"
+    - "\\bget_user\\b"
+    - "\\b__get_user\\b"
+    - "\\bstrncpy_from_user\\b"
+    - "\\bstrndup_user\\b"
+    - "\\bmemdup_user\\b"
+  dangerous_api:
+    - "\\bkasprintf\\b"
+    - "\\bsprintf\\b"
+    - "\\bstrcpy\\b"
+    - "\\bstrcat\\b"
+    - "\\bsimple_strtoul\\b"
+    - "\\b__nla_put\\b"
+  lifetime:
+    - "\\bkmalloc\\b"
+    - "\\bkzalloc\\b"
+    - "\\bkcalloc\\b"
+    - "\\bkfree\\b"
+    - "\\bvmalloc\\b"
+    - "\\bvfree\\b"
+    - "\\bkrealloc\\b"
+    - "\\bkmem_cache_alloc\\b"
+    - "\\bkmem_cache_free\\b"
+    - "\\bdevm_kmalloc\\b"
+    - "\\bdevm_kzalloc\\b"
+    - "\\bkref_put\\b"
+    - "\\bkref_get\\b"
+    - "\\bkobject_put\\b"
+  concurrency:
+    - "\\bmutex_lock\\b"
+    - "\\bmutex_unlock\\b"
+    - "\\bspin_lock\\b"
+    - "\\bspin_unlock\\b"
+    - "\\brcu_read_lock\\b"
+    - "\\brcu_read_unlock\\b"
+    - "\\bdown_read\\b"
+    - "\\bdown_write\\b"
+    - "\\bup_read\\b"
+    - "\\bup_write\\b"
+    - "\\batomic_.*\\b"
+    - "\\brefcount_.*\\b"
+  privilege:
+    - "\\bcapable\\b"
+    - "\\bns_capable\\b"
+    - "\\bcred\\b"
+    - "\\buid_eq\\b"
+    - "\\bCAP_SYS_ADMIN\\b"
+    - "\\bCAP_NET_ADMIN\\b"
+  guards:
+    - "\\baccess_ok\\b"
+    - "\\bcopy_to_user\\b"
+    - "\\bIS_ERR\\b"
+    - "\\bcheck_.*bounds\\b"
+    - "\\bvalidate_.*\\b"
+    - "\\bksize\\b"
+
+score_weights:
+  user_control: 3.5
+  dangerous_api: 2.5
+  lifetime: 3.0
+  concurrency: 2.5
+  privilege: 2.0
+  guards: -0.35
+
+false_positive_rules:
+  - pattern: ".*_exit$|cleanup_module"
+    reason: "모듈 언로드 시에만 호출 — 공격 표면 제한적"
+    auto_downgrade: true
+    target_risk: "low"
+  - pattern: ".*_probe$"
+    reason: "디바이스 프로브는 보통 커널 내부에서만 호출"
+    auto_downgrade: true
+    target_risk: "low"
+  - pattern: ".*_remove$|.*_disconnect$"
+    reason: "디바이스 제거 경로 — 제한된 공격 표면"
+    auto_downgrade: true
+    target_risk: "low"
+  - pattern: ".*_suspend$|.*_resume$"
+    reason: "전원 관리 콜백"
+    auto_downgrade: true
+    target_risk: "info"
+
+prompt_context:
+  role: "linux kernel vulnerability analyst"
+  framework_knowledge: |
+    ## Linux Kernel Module Analysis
+    - ioctl이 가장 큰 공격 표면: copy_from_user → 데이터 파싱 → 커널 동작
+    - file_operations(read/write/mmap)도 유저 접근 가능 경로
+    - sysfs/procfs 핸들러: show(읽기)/store(쓰기) — store가 더 위험
+    - 커널 메모리 관리: kmalloc/kfree 쌍 추적, slab UAF 주의
+    - 참조 카운팅: kref/kobject/refcount — off-by-one 시 UAF 또는 메모리 누수
+    - 동시성: mutex/spinlock 보호 범위 확인, RCU 올바른 사용 검증
+    - copy_from_user 반환값 미확인 → 초기화되지 않은 커널 스택 데이터 유출
+    - capable() 체크 누락 → 비특권 사용자가 특권 작업 수행
+    - 정수 오버플로우 → kmalloc 크기 → heap overflow
+    - TOCTOU: 유저 메모리를 두 번 읽으면 race condition
+  analysis_focus:
+    - "copy_from_user → 데이터 사용처 (taint tracking)"
+    - "kmalloc/kfree 쌍 매칭 (UAF, double-free)"
+    - "lock 범위와 공유 자원 접근 (race condition)"
+    - "capable() 체크 유무 (privilege escalation)"
+    - "정수 연산 → 버퍼 크기 계산 (integer overflow)"

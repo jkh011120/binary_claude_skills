@@ -1,0 +1,195 @@
+framework:
+  name: windows_driver
+  display_name: "Windows Kernel Driver"
+  description: "Windows 커널 드라이버 (.sys) — WDM, WDF(KMDF/UMDF), minifilter"
+
+entrypoint_patterns:
+  driver_entry:
+    - "DriverEntry"
+    - "GsDriverEntry"
+  dispatch:
+    - regex: ".*Dispatch.*"
+      description: "IRP dispatch routines"
+    - regex: ".*DeviceControl$"
+      description: "IOCTL dispatch (IRP_MJ_DEVICE_CONTROL)"
+    - regex: ".*InternalDeviceControl$"
+      description: "Internal IOCTL dispatch"
+  irp_handlers:
+    - regex: ".*Create$|.*Close$"
+      description: "IRP_MJ_CREATE / IRP_MJ_CLOSE"
+    - regex: ".*Read$|.*Write$"
+      description: "IRP_MJ_READ / IRP_MJ_WRITE"
+    - regex: ".*Cleanup$"
+      description: "IRP_MJ_CLEANUP"
+    - regex: ".*Pnp$|.*Power$"
+      description: "PnP/Power handlers"
+  wdf:
+    - regex: "^Evt.*"
+      description: "WDF event callbacks (EvtIoDeviceControl, EvtDriverDeviceAdd)"
+    - regex: ".*EvtIo(DeviceControl|Read|Write|InternalDeviceControl)$"
+  minifilter:
+    - regex: ".*Pre(Create|Write|Read|SetInformation|Cleanup)$"
+      description: "Minifilter pre-operation callbacks"
+    - regex: ".*Post(Create|Write|Read|SetInformation|Cleanup)$"
+      description: "Minifilter post-operation callbacks"
+    - "InstanceSetup"
+    - "InstanceQueryTeardown"
+  callbacks:
+    - regex: ".*Notify(Routine|Callback)$"
+    - regex: ".*RegisterCallback$"
+    - regex: "^Ob.*Callback$"
+      description: "Object manager callbacks"
+    - regex: "^Ps.*Notify.*$"
+      description: "Process/thread notification callbacks"
+    - regex: "^Cm.*Callback$"
+      description: "Registry callbacks"
+
+indicator_patterns:
+  user_control:
+    - "\\bProbeForRead\\b"
+    - "\\bProbeForWrite\\b"
+    - "\\bMmProbeAndLockPages\\b"
+    - "\\bIoGetCurrentIrpStackLocation\\b"
+    - "\\bIrp->AssociatedIrp\\.SystemBuffer\\b"
+    - "\\bIrp->UserBuffer\\b"
+    - "\\bIrp->MdlAddress\\b"
+    - "\\bWdfRequestRetrieveInputBuffer\\b"
+    - "\\bWdfRequestRetrieveOutputBuffer\\b"
+    - "\\bType3InputBuffer\\b"
+    - "\\bMmGetSystemAddressForMdlSafe\\b"
+  dangerous_api:
+    - "\\bstrcpy\\b"
+    - "\\bwcscpy\\b"
+    - "\\bRtlCopyMemory\\b"
+    - "\\bmemcpy\\b"
+    - "\\bsprintf\\b"
+    - "\\bswprintf\\b"
+    - "\\bRtlStringCbCopy\\b"
+    - "\\bRtlStringCchCopy\\b"
+    - "\\bZwCreateFile\\b"
+    - "\\bZwWriteFile\\b"
+    - "\\bMmMapIoSpace\\b"
+    - "\\bMmMapLockedPagesSpecifyCache\\b"
+  lifetime:
+    - "\\bExAllocatePool\\b"
+    - "\\bExAllocatePool2\\b"
+    - "\\bExAllocatePoolWithTag\\b"
+    - "\\bExFreePool\\b"
+    - "\\bExFreePoolWithTag\\b"
+    - "\\bIoAllocateIrp\\b"
+    - "\\bIoFreeIrp\\b"
+    - "\\bIoAllocateMdl\\b"
+    - "\\bIoFreeMdl\\b"
+    - "\\bObReferenceObject\\b"
+    - "\\bObDereferenceObject\\b"
+    - "\\bWdfObjectDelete\\b"
+    - "\\bWdfObjectDereference\\b"
+  concurrency:
+    - "\\bKeAcquireSpinLock\\b"
+    - "\\bKeReleaseSpinLock\\b"
+    - "\\bExAcquireFastMutex\\b"
+    - "\\bExReleaseFastMutex\\b"
+    - "\\bExAcquireResourceExclusiveLite\\b"
+    - "\\bExAcquireResourceSharedLite\\b"
+    - "\\bExReleaseResourceLite\\b"
+    - "\\bKeWaitForSingleObject\\b"
+    - "\\bKeWaitForMultipleObjects\\b"
+    - "\\bKeSetEvent\\b"
+    - "\\bIoAcquireRemoveLock\\b"
+    - "\\bIoReleaseRemoveLock\\b"
+  security:
+    - "\\bSeSinglePrivilegeCheck\\b"
+    - "\\bSeAccessCheck\\b"
+    - "\\bIoCheckShareAccess\\b"
+    - "\\bObCheckObjectAccess\\b"
+    - "\\bPsGetCurrentProcessId\\b"
+    - "\\bPsGetCurrentThreadId\\b"
+    - "\\bZwOpenProcess\\b"
+    - "\\bKeStackAttachProcess\\b"
+  ioctl_parsing:
+    - "\\bCTL_CODE\\b"
+    - "\\bIOCTL_\\b"
+    - "\\bMETHOD_BUFFERED\\b"
+    - "\\bMETHOD_NEITHER\\b"
+    - "\\bMETHOD_IN_DIRECT\\b"
+    - "\\bMETHOD_OUT_DIRECT\\b"
+  guards:
+    - "\\bProbeForRead\\b"
+    - "\\bProbeForWrite\\b"
+    - "\\b__try\\b"
+    - "\\b__except\\b"
+    - "\\bNT_SUCCESS\\b"
+    - "\\bNTSTATUS\\b"
+
+score_weights:
+  user_control: 3.5
+  dangerous_api: 2.5
+  lifetime: 3.0
+  concurrency: 2.5
+  security: 2.0
+  ioctl_parsing: 2.0
+  guards: -0.35
+
+false_positive_rules:
+  - pattern: ".*Unload$|DriverUnload"
+    reason: "드라이버 언로드 루틴 — 관리자만 트리거"
+    auto_downgrade: true
+    target_risk: "low"
+  - pattern: ".*Power$|.*Pnp$"
+    reason: "PnP/Power 핸들러 — 커널 내부 호출"
+    auto_downgrade: true
+    target_risk: "low"
+  - pattern: ".*Suspend$|.*Resume$"
+    reason: "전원 관리 콜백"
+    auto_downgrade: true
+    target_risk: "info"
+  - pattern: "^_?INIT$|^INIT_.*"
+    reason: "INIT 섹션 코드 — 부팅 시에만 실행"
+    auto_downgrade: true
+    target_risk: "info"
+
+prompt_context:
+  role: "windows kernel driver vulnerability analyst"
+  framework_knowledge: |
+    ## Windows Driver Analysis
+
+    ### IRP 흐름 (WDM)
+    - DriverEntry → IoCreateDevice → 디스패치 테이블 등록
+    - 유저: DeviceIoControl(hDevice, IOCTL_CODE, inBuf, inSize, outBuf, outSize, ...)
+    - 커널: IRP_MJ_DEVICE_CONTROL → IoGetCurrentIrpStackLocation → Parameters.DeviceIoControl
+    - 버퍼링 방식에 따라 접근 방법 다름:
+      * METHOD_BUFFERED: Irp->AssociatedIrp.SystemBuffer (안전, 커널이 복사)
+      * METHOD_NEITHER: IrpSp->Parameters.DeviceIoControl.Type3InputBuffer (위험! 유저 주소 직접)
+      * METHOD_IN/OUT_DIRECT: Irp->MdlAddress → MmGetSystemAddressForMdlSafe
+
+    ### WDF (KMDF)
+    - EvtDriverDeviceAdd → WdfIoQueueCreate → EvtIoDeviceControl 등록
+    - WdfRequestRetrieveInputBuffer/OutputBuffer로 버퍼 접근
+    - WDF가 동기화/생명주기 일부 관리하지만 완전하지 않음
+
+    ### Minifilter
+    - FltRegisterFilter → Pre/Post operation callbacks
+    - FltGetStreamContext, FltSetStreamContext 등으로 컨텍스트 관리
+    - Pre callback에서 STATUS_SUCCESS 반환 시 하위 필터로 전달
+
+    ### 핵심 취약점 패턴
+    1. METHOD_NEITHER IOCTL: ProbeForRead/Write 없이 유저 버퍼 직접 접근
+    2. IOCTL 입력 크기 미검증: InputBufferLength 체크 없이 구조체 캐스팅
+    3. 풀 메모리 관리: ExAllocatePool/ExFreePool 쌍 불일치 (UAF, double-free)
+    4. 참조 카운팅: ObReferenceObject/ObDereferenceObject 불균형
+    5. SpinLock IRQL: DISPATCH_LEVEL에서 페이지 폴트 유발 작업 → BSOD
+    6. __try/__except 누락: 유저 주소 접근 시 예외 처리 미비
+    7. 권한 체크 부재: 누구나 DeviceIoControl 호출 가능
+    8. TOCTOU: 유저 버퍼를 두 번 읽는 경우 (METHOD_NEITHER)
+
+    ### IOCTL 디스패치 분석 전략
+    - DriverEntry에서 MajorFunction[IRP_MJ_DEVICE_CONTROL] 핸들러 찾기
+    - 핸들러 내 switch(IoControlCode) 각 case 추적
+    - 각 IOCTL에 대해: 버퍼링 방식 + 입력 크기 검증 + 출력 크기 검증
+  analysis_focus:
+    - "IOCTL 디스패치 테이블 전체 매핑 (IoControlCode → handler)"
+    - "METHOD_NEITHER IOCTL의 ProbeForRead/ProbeForWrite 유무"
+    - "입력 버퍼 크기 검증 (InputBufferLength vs 실제 사용량)"
+    - "ExAllocatePool/ExFreePool 쌍 추적 (pool UAF)"
+    - "SpinLock 보유 중 안전하지 않은 호출"
+    - "DeviceObject에 대한 ACL/보안 디스크립터 설정 여부"
